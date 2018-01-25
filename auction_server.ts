@@ -78,3 +78,37 @@ app.get('/api/product/:id/comments', (req, res) => {
 const serve = app.listen(8000, "localhost", () => {
     console.log("服务器已启动， 地址是： http://localhost:8000");
 })
+
+const subscription = new Map<any, number[]>();
+
+const wsServer = new Server({port: 8085});
+wsServer.on("connection", websocket => {
+    websocket.send('这是服务器主动推送的消息');
+    websocket.on('message', message => {
+        let messageObj = JSON.parse(message);
+        let productIds = subscription.get(websocket) || [];
+        subscription.set(websocket, [...productIds, messageObj.productId]);
+    });
+});
+
+const currentBids = new Map<number, number>();
+
+setInterval(() => {
+    products.forEach( p => {
+        let currentBid = currentBids.get(p.id) || p.price;
+        let newBid = currentBid + Math.random() * 5;
+        currentBids.set(p.id, newBid);
+    });
+
+    subscription.forEach((productIds: number[], ws) => {
+        if (ws.readyState === 1) {
+            let newBids = productIds.map( pid => ({
+                products: pid,
+                bid: currentBids.get(pid)
+            }));
+            ws.send(JSON.stringify(newBids));
+        }else {
+            subscription.delete(ws);
+        }
+    })
+}, 2000);
