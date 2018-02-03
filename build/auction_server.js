@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var express = require("express");
+var ws_1 = require("ws");
 var app = express();
 var Product = /** @class */ (function () {
     function Product(id, title, price, rating, desc, categories) {
@@ -43,6 +44,17 @@ app.get('/', function (req, res) {
     res.send("Hello Express");
 });
 app.get('/api/products', function (req, res) {
+    var result = products;
+    var params = req.query;
+    if (params.title) {
+        result = result.filter(function (p) { return p.title.indexOf(params.title) !== -1; });
+    }
+    if (params.price && result.length > 0) {
+        result = result.filter(function (p) { return p.price <= parseInt(params.price); });
+    }
+    if (params.category !== "-1" && result.length > 0) {
+        result = result.filter(function (p) { return p.categories.indexOf(params.category) !== -1; });
+    }
     res.json(products);
 });
 app.get('/api/product/:id', function (req, res) {
@@ -56,3 +68,33 @@ app.get('/api/product/:id/comments', function (req, res) {
 var serve = app.listen(8000, "localhost", function () {
     console.log("服务器已启动， 地址是： http://localhost:8000");
 });
+var subscription = new Map();
+var wsServer = new ws_1.Server({ port: 8085 });
+wsServer.on("connection", function (websocket) {
+    websocket.send('这是服务器主动推送的消息');
+    websocket.on('message', function (message) {
+        var messageObj = JSON.parse(message);
+        var productIds = subscription.get(websocket) || [];
+        subscription.set(websocket, productIds.concat([messageObj.productId]));
+    });
+});
+var currentBids = new Map();
+setInterval(function () {
+    products.forEach(function (p) {
+        var currentBid = currentBids.get(p.id) || p.price;
+        var newBid = currentBid + Math.random() * 5;
+        currentBids.set(p.id, newBid);
+    });
+    subscription.forEach(function (productIds, ws) {
+        if (ws.readyState === 1) {
+            var newBids = productIds.map(function (pid) { return ({
+                products: pid,
+                bid: currentBids.get(pid)
+            }); });
+            ws.send(JSON.stringify(newBids));
+        }
+        else {
+            subscription.delete(ws);
+        }
+    });
+}, 2000);
